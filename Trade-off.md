@@ -1,29 +1,14 @@
-# MOVEINSYNC  
-## Mobile Device Management (MDM) System  
-
-### Trade-offs in System Design  
-### Architectural & Design Decision Analysis (Interview-Aligned)
-
-**Trade-offs Analysed:** 5  
-**Design Dimensions:** Performance, Scalability, Maintainability, Security  
-**Modules Covered:** Devices, Versions, RBAC, Workflow, Audit  
-**Patterns Used:** Repository, State Machine, Immutability, RBAC, Graph Traversal  
-
-**System Design Assignment | Java | February 2026**
+# Moveinsync Mobile Device Management (MDM) System  
+## Trade-offs in System Design  
+### Architectural & Design Decision Analysis  
 
 ---
 
 ## 1. Introduction
 
-Every non-trivial system design involves deliberate trade-offs. This document captures **five key design trade-offs** made while designing the **Moveinsync Mobile Device Management (MDM) System**.
+Every system design involves making deliberate choices between competing options. This document captures five key trade-offs made during the design of the Moveinsync Mobile Device Management (MDM) System. For each trade-off, we explain the option chosen, the alternatives that were considered, and the rationale behind the decision — evaluating each from the perspectives of performance, scalability, maintainability, and security.
 
-Each trade-off is analysed by:
-- The approach chosen
-- Alternatives considered
-- Rationale behind the decision
-- Impact on performance, scalability, maintainability, and security
-
-The guiding philosophy of this design is to **prioritise correctness, auditability, and clarity** over premature optimisation or unnecessary flexibility. All decisions are reversible if system requirements evolve toward a production-scale deployment.
+A trade-off in system design means accepting a disadvantage in one area in order to gain an advantage in another. Recognising and documenting these decisions is essential for building systems that are understandable, evolvable, and fit for purpose.
 
 ---
 
@@ -31,37 +16,40 @@ The guiding philosophy of this design is to **prioritise correctness, auditabili
 
 ### Decision
 
-The system stores all data — devices, app versions, workflows, and audit logs — **in-memory** using Java collections instead of a persistent relational database.
+The MDM system stores all data — devices, versions, audit logs, and workflows — entirely in-memory using Java's `HashMap` and `ArrayList` collections, rather than persisting data to a relational database.
 
-### Chosen Approach: In-Memory Storage
+### Chosen Approach: In-Memory HashMap / ArrayList
 
-- Devices stored in `HashMap<String, Device>` using **IMEI as primary key**
-- O(1) average lookup time
-- No external dependencies (DB server, JDBC, schema)
-- Entire system runs using a single `javac` command
-- Audit logs stored in `ArrayList` with O(1) append
+- All device records stored in `HashMap<String, Device>` with IMEI as the key  
+- O(1) average-case lookup time for any device by IMEI  
+- Zero setup required — no database server, no SQL schema, no JDBC drivers  
+- The entire system compiles and runs with a single `javac` command  
+- Audit logs stored in `ArrayList` and appended sequentially — O(1) insert  
 
-### Alternative: Relational Database (PostgreSQL)
+### Alternative Considered: PostgreSQL Relational Database
 
-- Persistent storage across restarts
-- Supports indexing, joins, and concurrency
-- Requires schema management, migrations, JDBC drivers
-- Higher operational and setup overhead
+- Devices, versions, and audit logs stored as separate SQL tables  
+- Data persists across application restarts  
+- Supports indexing, complex joins, and multi-user concurrent access  
+- Requires JDBC driver, connection pooling, and schema migrations  
+- Significant setup overhead for a demonstration or assignment system  
 
 ### Rationale
 
-The objective of this system is to **demonstrate domain logic, OOP principles, and architectural reasoning**, not production infrastructure. In-memory storage removes environmental complexity while still mirroring real-world indexing logic.
+The primary goal of this system is to demonstrate design principles, OOP patterns, and correct business logic — not production infrastructure. In-memory storage eliminates all environmental dependencies, making the system immediately runnable on any machine with Java installed.
 
-Persistence is intentionally isolated behind repository boundaries. In a production system, the in-memory layer can be replaced with a database-backed implementation **without modifying the service layer**.
+The `HashMap` structure mirrors how a production system would index data using a primary key, so the logic translates directly to a database-backed implementation.
+
+The accepted trade-off is that all data is lost when the application exits. In a real production deployment, this would be replaced with a database layer behind the same repository interfaces, requiring zero changes to the service layer.
 
 ### Impact Analysis
 
-| Aspect | In-Memory | Database | Rationale |
-|-----|----------|---------|-----------|
-| Performance | O(1) access | Indexed queries | In-memory faster at small scale |
-| Scalability | JVM-bound | Horizontally scalable | DB needed at massive scale |
-| Maintainability | No migrations | Schema evolution needed | Lower maintenance for scope |
-| Security | Transient data | Persistent encrypted data | Reduced attack surface |
+| Aspect | Option Chosen | Alternative | Rationale |
+|------|--------------|------------|-----------|
+| Performance | HashMap O(1) lookup | Indexed DB query | In-memory faster at this scale |
+| Scalability | JVM heap bound | Horizontal DB scaling | DB needed for 10M+ devices |
+| Maintainability | No migrations | Schema migrations required | Lower maintenance overhead |
+| Security | Data is transient | Persistent encrypted storage | Reduced attack surface |
 
 ---
 
@@ -69,35 +57,37 @@ Persistence is intentionally isolated behind repository boundaries. In a product
 
 ### Decision
 
-`AppVersion` and `AuditLog` are designed as **fully immutable objects**.
+The `AppVersion` and `AuditLog` model classes are fully immutable — they contain no setter methods. Once created, they cannot be modified.
 
-### Chosen Approach: Full Immutability
+### Chosen Approach: Full Immutability (No Setters)
 
-- All fields declared `final`
-- No setter methods
-- App versions are locked at publish time
-- Audit logs are permanent, append-only records
-- Updates require publishing a new version
+- All fields declared `final`  
+- No setter methods  
+- App version details locked at publish time  
+- Audit logs are permanent, tamper-proof records  
+- Updates require publishing a new version  
 
-### Alternative: Mutable Models
+### Alternative Considered: Mutable Objects with Setters
 
-- Allows post-publish edits
-- Requires version history tracking
-- Increases risk of silent or malicious data changes
+- Admins could edit version details post-publish  
+- Audit logs could be modified after creation  
+- Requires explicit version history tracking  
+- Risk of accidental or malicious data tampering  
 
 ### Rationale
 
-Version management and audit logs are **compliance-critical components**.  
-Immutability guarantees that once data is recorded, it becomes a **historical fact** that cannot be altered. This provides strong trust guarantees and simplifies reasoning in concurrent environments.
+App version management is safety-critical. If version attributes such as mandatory flags could be silently changed, devices might skip security patches without traceability.
+
+Audit logs serve governance and compliance needs. If logs could be edited, the audit trail would become untrustworthy. Immutability guarantees that every recorded action remains exactly as it occurred.
 
 ### Impact Analysis
 
-| Aspect | Immutable | Mutable | Rationale |
-|-----|----------|---------|-----------|
-| Performance | No locking | Synchronisation needed | Immutable is thread-safe |
+| Aspect | Option Chosen | Alternative | Rationale |
+|------|--------------|------------|-----------|
+| Performance | No locking | Synchronisation required | Immutable is thread-safe |
 | Scalability | Safe sharing | Defensive copying | Better concurrency |
-| Maintainability | Simple reasoning | Complex state tracking | Fewer bugs |
-| Security | Tamper-proof | Logs editable | Compliance requirement |
+| Maintainability | Simple state reasoning | Complex tracking | Fewer bugs |
+| Security | Tamper-proof logs | Editable history | Compliance requirement |
 
 ---
 
@@ -105,39 +95,38 @@ Immutability guarantees that once data is recorded, it becomes a **historical fa
 
 ### Decision
 
-Upgrade path validation uses **Breadth-First Search (BFS)** on a version compatibility graph.
+Upgrade path validation uses Breadth-First Search (BFS) over a compatibility graph rather than direct lookup or DFS.
 
-### Chosen Approach: BFS
+### Chosen Approach: Breadth-First Search (BFS)
 
-- Versions modelled as a directed graph
-- Guarantees **shortest upgrade path**
-- Automatically handles multi-step upgrades
-- Prevents cycles using a visited set
+- Compatibility matrix modelled as a directed graph  
+- BFS guarantees the shortest upgrade path  
+- Supports multi-step upgrades automatically  
+- Visited set prevents infinite cycles  
 
-### Alternatives
+### Alternative 1: Direct Lookup Table
 
-#### Direct Lookup Table
-- O(1) lookup
-- Cannot derive intermediate upgrade paths
-- Requires manual enumeration
+- O(1) lookup  
+- Cannot derive intermediate upgrade steps  
+- Requires manual path enumeration  
 
-#### Depth-First Search (DFS)
-- May return longer, suboptimal paths
-- Less predictable operational behaviour
+### Alternative 2: Depth-First Search (DFS)
+
+- Finds a valid path but not necessarily the shortest  
+- Less predictable operationally  
 
 ### Rationale
 
-App upgrades represent an **unweighted shortest-path problem**.  
-BFS is the correct algorithm both theoretically and operationally, ensuring devices go through the **fewest possible upgrade steps**, reducing risk and downtime.
+Devices must go through the fewest possible upgrade steps to minimise risk, downtime, and network usage. BFS guarantees correctness with negligible computational cost given the small size of version graphs.
 
 ### Impact Analysis
 
-| Aspect | BFS | Alternative | Rationale |
-|-----|-----|-----------|-----------|
-| Performance | O(V+E) | O(1) lookup | Cost negligible |
-| Scalability | Linear growth | Manual paths fail | Self-scaling |
-| Maintainability | Auto-derived paths | Manual upkeep | Lower admin burden |
-| Security | Enforces mandatory steps | Steps may be skipped | Safer upgrades |
+| Aspect | Option Chosen | Alternative | Rationale |
+|------|--------------|------------|-----------|
+| Performance | O(V+E) BFS | O(1) lookup | Cost negligible |
+| Scalability | Handles hundreds of versions | Manual paths break | Linear scaling |
+| Maintainability | Self-deriving paths | Manual upkeep | Less admin effort |
+| Security | Enforces required steps | Steps may be skipped | Safer upgrades |
 
 ---
 
@@ -145,34 +134,34 @@ BFS is the correct algorithm both theoretically and operationally, ensuring devi
 
 ### Decision
 
-Role-Based Access Control (RBAC) is implemented using **Java Enums**.
+RBAC is implemented using Java Enums instead of permission bitmasks or database-driven permissions.
 
-### Chosen Approach: Enum-Based RBAC
+### Chosen Approach: Enum-Based Roles
 
-- Roles: `SUPER_ADMIN`, `RELEASE_MANAGER`, `VIEWER`
-- Permissions defined via boolean methods
-- Compile-time safety
-- Self-documenting access rules
+- Roles: `SUPER_ADMIN`, `RELEASE_MANAGER`, `VIEWER`  
+- Permission checks via boolean methods  
+- Compile-time safety  
+- Self-documenting access control  
 
-### Alternative: Bitmask or DB-Driven Permissions
+### Alternative: Bitmask Permission System
 
-- Highly flexible
-- Harder to audit and debug
-- Over-engineered for stable roles
+- Highly flexible  
+- Harder to read and audit  
+- Risk of misconfiguration  
+- Over-engineered for stable roles  
 
 ### Rationale
 
-The system has a **small, stable set of roles**.  
-Enum-based RBAC optimises for **auditability and clarity over flexibility**, aligning with enterprise governance needs and the YAGNI principle.
+The system has a small, stable set of roles. Enum-based RBAC prioritises clarity and auditability over flexibility, aligning with the YAGNI principle.
 
 ### Impact Analysis
 
-| Aspect | Enum RBAC | Bitmask | Rationale |
-|-----|----------|---------|-----------|
-| Performance | O(1) | O(1) | Equal |
-| Scalability | Code changes needed | Dynamic roles | Enum sufficient |
+| Aspect | Option Chosen | Alternative | Rationale |
+|------|--------------|------------|-----------|
+| Performance | O(1) | O(1) | Same performance |
+| Scalability | Code change required | Dynamic permissions | Enum sufficient |
 | Maintainability | Readable & safe | Needs decoding | Easier audits |
-| Security | Type-safe | Misconfig risk | Safer by design |
+| Security | Type-safe | Bit errors possible | Safer design |
 
 ---
 
@@ -180,35 +169,34 @@ Enum-based RBAC optimises for **auditability and clarity over flexibility**, ali
 
 ### Decision
 
-Device updates are enforced via a **strict sequential state machine**.
+Device updates are enforced using a strict sequential state machine rather than a flexible workflow engine.
 
-### Chosen Approach: Strict State Machine
+### Chosen Approach: Strict Sequential State Machine
 
 **States:**
 
-- Every transition validated
-- Invalid transitions throw exceptions
-- All transitions logged
-- Retry re-enters `NOTIFIED`
+- Every transition validated  
+- Invalid transitions throw exceptions  
+- All state changes logged  
+- Retry returns to `NOTIFIED`  
 
 ### Alternative: Flexible Workflow Engine
 
-- Allows skipping or reordering states
-- More adaptable but harder to audit
-- Risk of masking failures
+- Allows skipping or reordering states  
+- More adaptable but harder to audit  
+- Risk of silent failure masking  
 
 ### Rationale
 
-Each state represents an **observability checkpoint**.  
-Strict sequencing ensures deterministic root-cause analysis and prevents silent failure masking — critical in large-scale device deployments.
+Each state provides operational visibility. Strict sequencing enables deterministic root-cause analysis and ensures no step can be bypassed.
 
 ### Impact Analysis
 
-| Aspect | Strict Machine | Flexible Engine | Rationale |
-|-----|---------------|----------------|-----------|
-| Performance | Minimal overhead | Higher complexity | Faster |
+| Aspect | Option Chosen | Alternative | Rationale |
+|------|--------------|------------|-----------|
+| Performance | Lightweight | Higher overhead | Faster |
 | Scalability | Independent workflows | Needs orchestration | Easier to scale |
-| Maintainability | Explicit transitions | External configs | Self-contained |
+| Maintainability | Explicit transitions | External config | Self-contained |
 | Security | No bypass possible | Skip risk | Strong guarantees |
 
 ---
@@ -216,7 +204,7 @@ Strict sequencing ensures deterministic root-cause analysis and prevents silent 
 ## 7. Overall Impact Summary
 
 | Trade-off | Performance | Scalability | Maintainability | Security |
-|---------|------------|------------|----------------|----------|
+|----------|-------------|--------------|------------------|----------|
 | In-Memory Storage | High | Medium | High | Medium |
 | Immutability | High | High | High | High |
 | BFS Upgrade Path | Medium | High | High | High |
@@ -227,12 +215,8 @@ Strict sequencing ensures deterministic root-cause analysis and prevents silent 
 
 ## 8. Conclusion
 
-The Moveinsync MDM system is designed with a clear bias toward **correctness, auditability, and operational clarity**.
+Every trade-off in the Moveinsync MDM system prioritises correctness, clarity, and security over premature optimisation.
 
-- In-memory storage removes infrastructure noise
-- Immutability guarantees trust and compliance
-- BFS ensures safest upgrade paths
-- Enum-based RBAC improves audit transparency
-- Strict state machines provide deterministic observability
+In-memory storage ensures portability. Immutability guarantees trust. BFS enforces safe upgrade paths. Enum-based RBAC improves auditability. The strict state machine ensures complete traceability of every device update.
 
-Each trade-off is **intentional, documented, and reversible**, making the system both fit for current requirements and ready for production evolution.
+Each decision is intentional and reversible, making the system suitable for both its current scope and future production evolution.
